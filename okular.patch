@@ -1,0 +1,112 @@
+From 931b8db687e98c04f0d508c436057d22fb6577fa Mon Sep 17 00:00:00 2001
+From: Eduardo Gastal <eslgastal@inf.ufrgs.br>
+Date: Wed, 15 Oct 2025 06:13:46 -0300
+Subject: [PATCH] Custom signature stamp text.
+
+---
+ generators/poppler/annots.cpp        |  1 +
+ generators/poppler/generator_pdf.cpp | 23 ++++++++++++++++++-----
+ part/pageviewannotator.cpp           | 13 ++++++++++---
+ 3 files changed, 29 insertions(+), 8 deletions(-)
+
+diff --git a/generators/poppler/annots.cpp b/generators/poppler/annots.cpp
+index 8dc0d8fa6..32021a23c 100644
+--- a/generators/poppler/annots.cpp
++++ b/generators/poppler/annots.cpp
+@@ -505,6 +505,7 @@ static std::unique_ptr<Poppler::Annotation> createPopplerAnnotationFromOkularAnn
+     }
+ 
+     pSignatureAnnotation->setBorderColor(QColor(0, 0, 0));
++    pSignatureAnnotation->setBorderWidth(0.0);
+     pSignatureAnnotation->setFontColor(QColor(0, 0, 0));
+ 
+     setSharedAnnotationPropertiesToPopplerAnnotation(oSignatureAnnotation, pSignatureAnnotation.get());
+diff --git a/generators/poppler/generator_pdf.cpp b/generators/poppler/generator_pdf.cpp
+index dda315150..1932463ef 100644
+--- a/generators/poppler/generator_pdf.cpp
++++ b/generators/poppler/generator_pdf.cpp
+@@ -1497,14 +1497,27 @@ void PDFGenerator::okularToPoppler(const Okular::NewSignatureData &oData, Popple
+     pData->setPassword(oData.password());
+     pData->setPage(oData.page());
+     const QString datetime = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd hh:mm:ss t"));
+-    pData->setSignatureText(i18n("Signed by: %1\n\nDate: %2", oData.certSubjectCommonName(), datetime));
+-    pData->setSignatureLeftText(oData.certSubjectCommonName());
++    /////////////////////////
++    QString certSubjectCommonName = oData.certSubjectCommonName();
++    int colonIndex = certSubjectCommonName.indexOf(QChar::fromLatin1(':'));
++    if (colonIndex != -1) {
++        certSubjectCommonName = certSubjectCommonName.left(colonIndex);
++    }
++    const QString signatureText =
++        QStringLiteral("Documento assinado digitalmente\n\n%1\nData: %2\nVerifique em https://v.ufsc.br")
++            .arg(certSubjectCommonName).arg(datetime);
++    pData->setSignatureText(signatureText);
++    pData->setSignatureLeftText(QStringLiteral(" "));
++    /////////////////////////
++    // pData->setSignatureText(i18n("Signed by: %1\n\nDate: %2", oData.certSubjectCommonName(), datetime));
++    // pData->setSignatureLeftText(oData.certSubjectCommonName());
+     pData->setFontSize(oData.fontSize());
+     pData->setLeftFontSize(oData.leftFontSize());
+     const Okular::NormalizedRect bRect = oData.boundingRectangle();
+     pData->setBoundingRectangle({bRect.left, bRect.top, bRect.width(), bRect.height()});
+     pData->setFontColor(Qt::black);
+     pData->setBorderColor(Qt::black);
++    pData->setBorderWidth(0.0);
+     pData->setReason(oData.reason());
+     pData->setLocation(oData.location());
+     pData->setDocumentOwnerPassword(oData.documentPassword().toLatin1());
+@@ -2220,8 +2233,8 @@ std::pair<Okular::SigningResult, QString> PDFGenerator::sign(const Okular::NewSi
+         const Okular::NormalizedRect bRect = oData.boundingRectangle();
+         // 2 is an experimental decided upon fudge factor to compensate for the fact that pageSize is in points
+         // but most of this ends up working in pixels anyway
+-        double width = pdfdoc->page(oData.page())->pageSizeF().width() * bRect.width() * 2;
+-        double height = pdfdoc->page(oData.page())->pageSizeF().height() * bRect.height() * 2;
++        double width = pdfdoc->page(oData.page())->pageSizeF().width() * bRect.width() * 4;
++        double height = pdfdoc->page(oData.page())->pageSizeF().height() * bRect.height() * 4;
+ 
+         QImageReader reader(oData.backgroundImagePath());
+         QSize imageSize = reader.size();
+@@ -2234,7 +2247,7 @@ std::pair<Okular::SigningResult, QString> PDFGenerator::sign(const Okular::NewSi
+             bool success = scaled.save(timg.fileName(), "png");
+             if (success) {
+                 pData.setImagePath(timg.fileName());
+-                pData.setBackgroundColor(Qt::white);
++                // pData.setBackgroundColor(Qt::white);
+             }
+         }
+     }
+diff --git a/part/pageviewannotator.cpp b/part/pageviewannotator.cpp
+index eec3a413e..ba629eb5e 100644
+--- a/part/pageviewannotator.cpp
++++ b/part/pageviewannotator.cpp
+@@ -360,9 +360,16 @@ public:
+         // find out annotation's type
+         Okular::SignatureAnnotation *ann = new Okular::SignatureAnnotation();
+ 
+-        const QString certSubjectCommonName = m_signingInformation->certificate->subjectInfo(Okular::CertificateInfo::CommonName, Okular::CertificateInfo::EmptyString::TranslatedNotAvailable);
++        QString certSubjectCommonName = m_signingInformation->certificate->subjectInfo(Okular::CertificateInfo::CommonName, Okular::CertificateInfo::EmptyString::TranslatedNotAvailable);
++        // NOTE(eslgastal): Remove CPF da assinatura
++        int colonIndex = certSubjectCommonName.indexOf(QChar::fromLatin1(':'));
++        if (colonIndex != -1) {
++            certSubjectCommonName = certSubjectCommonName.left(colonIndex);
++        }
+         const QString datetime = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd hh:mm:ss t"));
+-        const QString signatureText = i18n("Signed by: %1\n\nDate: %2", certSubjectCommonName, datetime);
++        const QString signatureText =
++            QStringLiteral("Documento assinado digitalmente\n\n%1\nData: %2\nVerifique em https://v.ufsc.br")
++                .arg(certSubjectCommonName).arg(datetime);
+ 
+         m_creationCompleted = false;
+         clicked = false;
+@@ -371,7 +378,7 @@ public:
+             return QList<Okular::Annotation *>();
+         }
+ 
+-        ann->setLeftText(certSubjectCommonName);
++        ann->setLeftText(QStringLiteral(" "));
+         ann->setText(signatureText);
+         ann->setImagePath(m_signingInformation->backgroundImagePath);
+ 
+-- 
+2.44.1
+
